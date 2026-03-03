@@ -1,0 +1,34 @@
+name: Build PHP Android ARM64
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential autoconf bison re2c libtool pkg-config unzip wget
+
+      - name: Install Android NDK
+        run: |
+          wget https://dl.google.com/android/repository/android-ndk-r26b-linux.zip
+          unzip android-ndk-r26b-linux.zip
+          echo "ANDROID_NDK_ROOT=$PWD/android-ndk-r26b" >> $GITHUB_ENV
+
+      - name: Build PHP
+        run: |
+          chmod +x build-android.sh
+          ./build-android.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: php-android-arm64
+          path: output/php
