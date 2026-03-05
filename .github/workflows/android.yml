@@ -20,7 +20,7 @@ jobs:
           sudo apt install -y build-essential autoconf bison re2c \
           pkg-config wget unzip libtool
 
-      - name: Download PHP
+      - name: Download PHP 7.0.3
         run: |
           wget https://museum.php.net/php7/php-7.0.3.tar.gz
           tar -xf php-7.0.3.tar.gz
@@ -35,6 +35,75 @@ jobs:
         run: |
           echo "TOOLCHAIN=$NDK/toolchains/llvm/prebuilt/linux-x86_64" >> $GITHUB_ENV
 
+      - name: Configure PHP
+        run: |
+          export TOOLCHAIN=$NDK/toolchains/llvm/prebuilt/linux-x86_64
+          export CC=$TOOLCHAIN/bin/${TARGET}${API}-clang
+          export CXX=$TOOLCHAIN/bin/${TARGET}${API}-clang++
+          export AR=$TOOLCHAIN/bin/llvm-ar
+          export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
+          export STRIP=$TOOLCHAIN/bin/llvm-strip
+          export LD=$TOOLCHAIN/bin/ld.lld
+
+          cd php-7.0.3
+
+          ./configure \
+          --host=$TARGET \
+          --prefix=/PocketMine/bin/php7 \
+          --enable-cli \
+          --enable-maintainer-zts \
+          --enable-pthreads \
+          --enable-mbstring \
+          --enable-calendar \
+          --enable-ctype \
+          --enable-sockets \
+          --enable-shmop \
+          --enable-pcntl \
+          --enable-bcmath \
+          --enable-zip \
+          --enable-ftp \
+          --enable-phar \
+          --enable-opcache \
+          --enable-weakref \
+          --enable-mysqlnd \
+          --with-mysqli=mysqlnd \
+          --with-zlib \
+          --with-pic \
+          --disable-cgi \
+          --disable-session \
+          --disable-fileinfo \
+          --disable-libxml \
+          --disable-xml \
+          --disable-dom \
+          --disable-simplexml \
+          --disable-xmlreader \
+          --disable-xmlwriter \
+          --disable-pdo \
+          --without-pear \
+          --without-iconv \
+          CFLAGS="-fPIC -O2 -DANDROID -D__ANDROID_API__=21" \
+          LDFLAGS="-llog"
+
+      - name: Build
+        run: |
+          cd php-7.0.3
+          make -j$(nproc)
+
+      - name: Install
+        run: |
+          cd php-7.0.3
+          make install DESTDIR=$PWD/output
+
+      - name: Strip binary
+        run: |
+          $NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip \
+          php-7.0.3/output/PocketMine/bin/php7/bin/php || true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: php-7.0.3-android-arm64
+          path: php-7.0.3/output
       - name: Configure PHP
         run: |
           export CC=$TOOLCHAIN/bin/${TARGET}${API}-clang
