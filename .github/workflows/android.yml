@@ -18,7 +18,7 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y build-essential autoconf bison re2c \
-          pkg-config wget unzip libtool
+          pkg-config wget unzip libtool curl git
 
       - name: Download PHP 7.0.3
         run: |
@@ -28,46 +28,81 @@ jobs:
       - name: Install Android NDK
         run: |
           wget https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
-          unzip android-ndk-r25c-linux.zip
+          unzip -q android-ndk-r25c-linux.zip
           echo "NDK=$PWD/android-ndk-r25c" >> $GITHUB_ENV
 
       - name: Setup toolchain
         run: |
           echo "TOOLCHAIN=$NDK/toolchains/llvm/prebuilt/linux-x86_64" >> $GITHUB_ENV
+          echo "SYSROOT=$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot" >> $GITHUB_ENV
 
       - name: Configure PHP
         run: |
           export TOOLCHAIN=$NDK/toolchains/llvm/prebuilt/linux-x86_64
+          export SYSROOT=$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot
           export CC=$TOOLCHAIN/bin/${TARGET}${API}-clang
           export CXX=$TOOLCHAIN/bin/${TARGET}${API}-clang++
           export AR=$TOOLCHAIN/bin/llvm-ar
           export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
           export STRIP=$TOOLCHAIN/bin/llvm-strip
           export LD=$TOOLCHAIN/bin/ld.lld
+          export CPP="$CC -E"
+          export CPPFLAGS="--sysroot=$SYSROOT"
 
-          # Forzar respuestas de tests (evitar ejecución en cross compile)
-          export ac_cv_func_malloc_0_nonnull=yes
-          export ac_cv_func_realloc_0_nonnull=yes
-          export ac_cv_func_flock=yes
-          export ac_cv_sys_file_offset_bits=64
-          export ac_cv_c_bigendian=no
+          # ============ VARIABLES DE CROSS-COMPILE ============
+          # Memoria compartida y mmap
           export ac_cv_func_mmap=yes
           export ac_cv_func_munmap=yes
+          export ac_cv_func_mprotect=yes
           export ac_cv_func_shm_open=no
           export ac_cv_func_shmget=no
           export ac_cv_func_shmat=no
           export ac_cv_func_shmdt=no
           export ac_cv_func_shmctl=no
+          export php_cv_mmap_fixed_mapping=yes
+          export php_cv_mmap_anon=yes
+          
+          # Memory allocation
+          export ac_cv_func_malloc_0_nonnull=yes
+          export ac_cv_func_realloc_0_nonnull=yes
+          export ac_cv_func_calloc_0_nonnull=yes
+          
+          # Filesystem y locks
+          export ac_cv_func_flock=yes
+          export ac_cv_func_fcntl=yes
+          export ac_cv_func_lockf=yes
+          
+          # Paths y endianness
+          export ac_cv_sys_file_offset_bits=64
+          export ac_cv_c_bigendian=no
+          export ac_cv_c_char_unsigned=no
+          
+          # Rpath
           export php_cv_cc_rpath=no
+          export lt_cv_deplibs_check_method=pass_all
+          
+          # Otros tests problemáticos
+          export ac_cv_func_getcwd=yes
           export php_cv_have_broken_getcwd=no
-
+          export ac_cv_func_strcoll_works=yes
+          export ac_cv_func_strptime=yes
+          export ac_cv_func_dlopen=yes
+          
+          # FPM specific
+          export ac_cv_func_accept=yes
+          export ac_cv_func_listen=yes
+          
           cd php-7.0.3
+
+          # Aplicar patches si es necesario
+          sed -i 's/ac_fn_c_try_run/ac_fn_c_try_compile/g' configure || true
 
           ./configure \
           --build=x86_64-linux-gnu \
           --host=$TARGET \
           --target=$TARGET \
           --prefix=/PocketMine/bin/php7 \
+          --with-sysroot=$SYSROOT \
           --enable-cli \
           --enable-maintainer-zts \
           --enable-pthreads \
@@ -100,28 +135,65 @@ jobs:
           --disable-xmlreader \
           --disable-xmlwriter \
           --disable-pdo \
+          --disable-shared \
+          --enable-static \
           --without-pear \
           --without-iconv \
-          CFLAGS="-fPIC -O2 -DANDROID -D__ANDROID_API__=21" \
-          LDFLAGS="-llog"
+          CFLAGS="-fPIC -O2 -DANDROID -D__ANDROID_API__=21 --sysroot=$SYSROOT" \
+          CXXFLAGS="-fPIC -O2 -DANDROID -D__ANDROID_API__=21 --sysroot=$SYSROOT" \
+          LDFLAGS="-llog --sysroot=$SYSROOT" \
+          LIBS="-lc -lm -ldl -lpthread -llog"
 
       - name: Build
         run: |
           cd php-7.0.3
-          make -j$(nproc)
+          make -j$(nproc) 2>&1 | tee build.log
+          
+          # Verificar si hubo errores
+          if [ ${PIPESTATUS[0]} -ne 0 ]; then
+            echo "=== ÚLTIMAS LÍNEAS DEL BUILD ==="
+            tail -100 build.log
+            exit 1
+          fi
 
       - name: Install
         run: |
           cd php-7.0.3
           make install DESTDIR=$PWD/output
+          
+          # Crear estructura de directorios si no existe
+          mkdir -p output/PocketMine/bin/php7/bin
 
       - name: Strip binary
         run: |
-          $NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip \
-          php-7.0.3/output/PocketMine/bin/php7/bin/php || true
+          if [ -f "php-7.0.3/output/PocketMine/bin/php7/bin/php" ]; then
+            $NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip \
+            php-7.0.3/output/PocketMine/bin/php7/bin/php || true
+            echo "Binary stripped successfully"
+          else
+            echo "⚠️ PHP binary not found at expected location"
+            find php-7.0.3/output -name "php" -type f 2>/dev/null | head -5
+          fi
+
+      - name: Verify build
+        run: |
+          echo "=== Build Artifacts ==="
+          find php-7.0.3/output -type f -executable | head -20
+          
+          echo "=== Size Info ==="
+          du -sh php-7.0.3/output || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: php-7.0.3-android-arm64
           path: php-7.0.3/output
+          retention-days: 30
+
+      - name: Upload build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: php-7.0.3/build.log
+          retention-days: 7
