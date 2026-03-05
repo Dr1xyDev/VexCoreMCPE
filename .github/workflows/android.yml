@@ -45,10 +45,21 @@ jobs:
           export STRIP=$TOOLCHAIN/bin/llvm-strip
           export LD=$TOOLCHAIN/bin/ld.lld
 
+          # Forzar respuestas de tests que fallan en cross compile
+          export ac_cv_func_malloc_0_nonnull=yes
+          export ac_cv_func_realloc_0_nonnull=yes
+          export ac_cv_func_flock=yes
+          export ac_cv_sys_file_offset_bits=64
+          export ac_cv_c_bigendian=no
+          export php_cv_cc_rpath=no
+          export php_cv_have_broken_getcwd=no
+
           cd php-7.0.3
 
           ./configure \
+          --build=x86_64-linux-gnu \
           --host=$TARGET \
+          --target=$TARGET \
           --prefix=/PocketMine/bin/php7 \
           --enable-cli \
           --enable-maintainer-zts \
@@ -103,73 +114,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: php-7.0.3-android-arm64
-          path: php-7.0.3/output
-      - name: Configure PHP
-        run: |
-          export CC=$TOOLCHAIN/bin/${TARGET}${API}-clang
-          export CXX=$TOOLCHAIN/bin/${TARGET}${API}-clang++
-          export AR=$TOOLCHAIN/bin/llvm-ar
-          export RANLIB=$TOOLCHAIN/bin/llvm-ranlib
-          export STRIP=$TOOLCHAIN/bin/llvm-strip
-          export LD=$TOOLCHAIN/bin/ld.lld
-
-          cd php-7.0.3
-
-          ./configure \
-          --host=$TARGET \
-          --prefix=/PocketMine/bin/php7 \
-          --enable-cli \
-          --enable-maintainer-zts \
-          --enable-pthreads \
-          --enable-mbstring \
-          --enable-calendar \
-          --enable-ctype \
-          --enable-sockets \
-          --enable-shmop \
-          --enable-pcntl \
-          --enable-bcmath \
-          --enable-zip \
-          --enable-ftp \
-          --enable-phar \
-          --enable-opcache \
-          --enable-weakref \
-          --enable-mysqlnd \
-          --with-mysqli=mysqlnd \
-          --with-zlib \
-          --with-curl \
-          --with-gmp \
-          --with-pic \
-          --disable-cgi \
-          --disable-session \
-          --disable-fileinfo \
-          --disable-libxml \
-          --disable-xml \
-          --disable-dom \
-          --disable-simplexml \
-          --disable-xmlreader \
-          --disable-xmlwriter \
-          --disable-pdo \
-          --without-pear \
-          --without-iconv \
-          CFLAGS="-fPIC -O2 -DANDROID -D__ANDROID_API__=21" \
-          LDFLAGS="-llog"
-
-      - name: Build
-        run: |
-          cd php-7.0.3
-          make -j$(nproc)
-
-      - name: Install
-        run: |
-          cd php-7.0.3
-          make install DESTDIR=$PWD/output
-
-      - name: Strip binary
-        run: |
-          $TOOLCHAIN/bin/llvm-strip php-7.0.3/output/PocketMine/bin/php7/bin/php || true
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: php-7.0.3-android-arm64-full
           path: php-7.0.3/output
